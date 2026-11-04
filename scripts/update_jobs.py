@@ -3,6 +3,7 @@ import re
 import json
 import urllib.request
 
+normalized_jobs = []
 APIFY_TOKEN = os.environ.get("APIFY_API_TOKEN")
 
 # Keywords weighted to your profile
