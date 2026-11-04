@@ -42,7 +42,7 @@ def fetch_apify_actor(actor_id, payload):
 def main():
     # 1. Fetch HiringCafe & LinkedIn jobs via Apify
     hc_payload = {
-        "searchQueries": ["Technical Project Manager", "Product Manager", "IT Program Manager", "Operation Manager"],
+        "searchQueries": ["Technical Project Manager", "Product Manager", "IT Program Manager", "IT Delivery Lead", "Deputy Program Manager" ],
         "locations": ["Virginia", "Washington, DC", "Maryland", "Remote"],
         "salary": ["180,000" , "190,000"],
         "maxItems": 50
