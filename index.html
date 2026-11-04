@@ -1627,6 +1627,10 @@ const initialJobs = [
         const key = makeJobKey(enriched.title, enriched.company);
         if (!mergedMap.has(key)) {
           mergedMap.set(key, enriched);
+          // Update the KPI dashboard and badges dynamically
+document.getElementById('kpiTotalListings').innerText = jobsToRender.length;
+document.getElementById('countAllBadge').innerText = jobsToRender.length;
+document.getElementById('activeFilterSummary').innerText = `Displaying all ${jobsToRender.length} roles across HiringCafe & LinkedIn`;
         }
       });
 
