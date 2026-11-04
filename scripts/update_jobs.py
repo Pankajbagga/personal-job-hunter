@@ -41,9 +41,9 @@ def fetch_apify_actor(actor_id, payload):
 def main():
     # 1. Fetch HiringCafe & LinkedIn jobs via Apify
     hc_payload = {
-        "searchQueries": ["Technical Project Manager", "Agile Product Owner", "IT Program Manager"],
+        "searchQueries": ["Technical Project Manager", "Product Manager", "IT Program Manager"],
         "locations": ["Virginia", "Washington, DC", "Maryland", "Remote"],
-        "maxItems": 15
+        "maxItems": 100
     }
     raw_jobs = fetch_apify_actor("ocrad~hiringcafe-jobs-scraper", hc_payload)
 
