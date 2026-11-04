@@ -71,20 +71,65 @@ def main():
         print("No new jobs returned from API; keeping existing board state.")
         return
 
-    # 2. Inject into index.html between marker comments
-    with open("index.html", "r", encoding="utf-8") as f:
-        html = f.read()
+ # 2. Inject and APPEND into index.html
+with open("index.html", "r", encoding="utf-8") as f:
+    html = f.read()
 
-    pattern = r"(// <!-- JOBS_DATA_START -->).*?(// <!-- JOBS_DATA_END -->)"
-    replacement = f"\\1\nconst initialJobs = {json.dumps(normalized_jobs, indent=2)};\n\\2"
+pattern = r"(// <!-- JOBS_DATA_START -->\s*const initialJobs = )(\[.*?\])(;\s*// <!-- JOBS_DATA_END -->)"
+match = re.search(pattern, html, flags=re.DOTALL)
 
-    if re.search(pattern, html, flags=re.DOTALL):
-        updated_html = re.sub(pattern, replacement, html, flags=re.DOTALL)
-        with open("index.html", "w", encoding="utf-8") as f:
-            f.write(updated_html)
-        print(f"Successfully injected {len(normalized_jobs)} jobs into index.html.")
-    else:
-        print("Markers // <!-- JOBS_DATA_START --> not found in index.html.")
+if match:
+    # Load existing jobs from the HTML
+    existing_jobs_json = match.group(2)
+    try:
+        existing_jobs = json.loads(existing_jobs_json)
+    except:
+        existing_jobs = []
+        
+    # Merge and deduplicate by Job Title + Company
+    seen = {f"{job['title']} {job['company']}": True for job in existing_jobs}
+    added_count = 0
+    
+    for job in normalized_jobs:
+        key = f"{job['title']} {job['company']}"
+        if key not in seen:
+            existing_jobs.insert(0, job) # Put newest jobs at the top
+            seen[key] = True
+            added_count += 1
+            
+# 2. Inject and APPEND into index.html
+with open("index.html", "r", encoding="utf-8") as f:
+    html = f.read()
 
-if __name__ == "__main__":
-    main()
+pattern = r"(// <!-- JOBS_DATA_START -->\s*const initialJobs = )(\[.*?\])(;\s*// <!-- JOBS_DATA_END -->)"
+match = re.search(pattern, html, flags=re.DOTALL)
+
+if match:
+    # Load existing jobs from the HTML
+    existing_jobs_json = match.group(2)
+    try:
+        existing_jobs = json.loads(existing_jobs_json)
+    except:
+        existing_jobs = []
+        
+    # Merge and deduplicate by Job Title + Company
+    seen = {f"{job['title']} {job['company']}": True for job in existing_jobs}
+    added_count = 0
+    
+    for job in normalized_jobs:
+        key = f"{job['title']} {job['company']}"
+        if key not in seen:
+            existing_jobs.insert(0, job) # Put newest jobs at the top
+            seen[key] = True
+            added_count += 1
+    
+    # Write back to HTML
+    updated_json = json.dumps(existing_jobs, indent=2)
+    replacement = f"\\1{updated_json}\\3"
+    updated_html = re.sub(pattern, replacement, html, flags=re.DOTALL)
+    
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(updated_html)
+    print(f"Successfully appended {added_count} new jobs. Board now has {len(existing_jobs)} total jobs.")
+else:
+    print("Markers not found in index.html.")
