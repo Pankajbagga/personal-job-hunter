@@ -1,11 +1,12 @@
 import os
 import re
 import json
+import time
 import urllib.request
+import urllib.error
 
 APIFY_TOKEN = os.environ.get("APIFY_API_TOKEN")
 
-# Keywords weighted to your profile
 KEYWORDS = {
     "PMP": 5, "CSPO": 5, "SAFe": 4, "POPM": 4, "PSM": 3,
     "Public Trust": 6, "Agile": 3, "AWS": 4, "Federal": 5,
@@ -26,62 +27,103 @@ def fetch_apify_actor(actor_id, payload):
         return []
 
     formatted_actor_id = actor_id.replace("/", "~")
-    url = f"https://api.apify.com/v2/acts/{formatted_actor_id}/run-sync-get-dataset-items"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {APIFY_TOKEN.strip()}"
+    }
 
+    # 1. Trigger the run asynchronously
+    start_url = f"https://api.apify.com/v2/acts/{formatted_actor_id}/runs"
     req = urllib.request.Request(
-        url,
+        start_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {APIFY_TOKEN.strip()}"
-        },
+        headers=headers,
         method="POST"
     )
+
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            run_data = json.loads(resp.read().decode("utf-8"))
+            run_id = run_data["data"]["id"]
+            dataset_id = run_data["data"]["defaultDatasetId"]
+            print(f"Started Apify Actor run: {run_id}")
+    except urllib.error.HTTPError as e:
+        print(f"Apify HTTP {e.code} Error starting {actor_id}: {e.read().decode('utf-8')}")
+        return []
+    except Exception as e:
+        print(f"Error starting {actor_id}: {e}")
+        return []
+
+    # 2. Poll until the run completes (timeout after 5 minutes)
+    poll_url = f"https://api.apify.com/v2/actor-runs/{run_id}"
+    max_wait = 300
+    elapsed = 0
+    poll_interval = 10
+
+    while elapsed < max_wait:
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+
+        try:
+            poll_req = urllib.request.Request(poll_url, headers=headers)
+            with urllib.request.urlopen(poll_req, timeout=30) as resp:
+                status_data = json.loads(resp.read().decode("utf-8"))
+                status = status_data["data"]["status"]
+                print(f"Actor status: {status} ({elapsed}s elapsed)")
+
+                if status == "SUCCEEDED":
+                    break
+                elif status in ["FAILED", "ABORTED", "TIMED-OUT"]:
+                    print(f"Actor run failed with status: {status}")
+                    return []
+        except Exception as e:
+            print(f"Polling error: {e}")
+
+    # 3. Retrieve dataset items
+    data_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?clean=true&format=json"
+    try:
+        data_req = urllib.request.Request(data_url, headers=headers)
+        with urllib.request.urlopen(data_req, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
-        print(f"Error calling {actor_id}: {e}")
+        print(f"Error fetching dataset items: {e}")
         return []
 
 def main():
-    target_roles = [
-        "Technical Project Manager",
-        "IT Program Manager",
-        "Agile Product Owner",
-        "IT Delivery Lead"
-    ]
+    payload = {
+        "queries": [
+            "Technical Project Manager",
+            "IT Program Manager",
+            "Agile Product Owner"
+        ],
+        "locations": ["Virginia", "Washington DC", "Remote"],
+        "maxItems": 25,
+        "datePosted": "past-week"
+    }
 
-    raw_jobs = []
-    for role in target_roles:
-        hc_payload = {
-            "searchQuery": role,
-            "location": "Virginia, Washington DC, Maryland, Remote",
-            "maxItems": 15
-        }
-        items = fetch_apify_actor("ocrad/hiringcafe-jobs-scraper", hc_payload)
-        if isinstance(items, list):
-            raw_jobs.extend(items)
+    print("Fetching jobs via Apify (bebity/linkedin-jobs-scraper)...")
+    raw_jobs = fetch_apify_actor("bebity/linkedin-jobs-scraper", payload)
 
     normalized_jobs = []
-    for item in raw_jobs:
-        title = item.get("job_title") or item.get("title") or "Technical Project Manager"
-        company = item.get("company_name") or item.get("company") or "Enterprise Partner"
-        desc = item.get("job_description") or item.get("description") or ""
-        location = item.get("location") or "Northern Virginia / Remote"
-        url = item.get("apply_url") or item.get("url") or "https://hiringcafe.com"
+    if isinstance(raw_jobs, list):
+        for item in raw_jobs:
+            title = item.get("title") or item.get("jobTitle") or "Technical Project Manager"
+            company = item.get("companyName") or item.get("company") or "Enterprise Partner"
+            desc = item.get("description") or item.get("jobDescription") or ""
+            location = item.get("location") or "Virginia / Remote"
+            url = item.get("link") or item.get("jobUrl") or item.get("url") or "https://www.linkedin.com"
 
-        match_score = score_job(f"{title} {desc}")
-        normalized_jobs.append({
-            "title": title,
-            "company": company,
-            "source": "HiringCafe",
-            "ats": item.get("ats", "Workday"),
-            "match": match_score,
-            "tags": [location, "PMP / Agile", "Full-Time"],
-            "desc": desc[:240] + "..." if len(desc) > 240 else desc,
-            "url": url
-        })
+            match_score = score_job(f"{title} {desc}")
+            normalized_jobs.append({
+                "title": title,
+                "company": company,
+                "source": "LinkedIn",
+                "ats": item.get("ats", "Direct"),
+                "match": match_score,
+                "tags": [location, "PMP / Agile", "Full-Time"],
+                "desc": desc[:240] + "..." if len(desc) > 240 else desc,
+                "url": url
+            })
 
     if not normalized_jobs:
         print("No new jobs returned from API; keeping existing board state.")
