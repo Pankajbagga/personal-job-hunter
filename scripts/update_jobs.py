@@ -52,7 +52,7 @@ def main():
         ],
         "locations": ["Virginia", "Washington, DC", "Maryland", "Remote"]
     }
-    raw_jobs = fetch_apify_actor("blackfalcondata/hiringcafe-scraper", hc_payload)
+    raw_jobs = fetch_apify_actor("memo23/apify-hiring-cafe-scraper", hc_payload)
 
     normalized_jobs = []
     for item in raw_jobs:
