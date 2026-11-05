@@ -1,9 +1,9 @@
+
 import os
 import re
 import json
 import urllib.request
 
-normalized_jobs = []
 APIFY_TOKEN = os.environ.get("APIFY_API_TOKEN")
 
 # Keywords weighted to your profile
@@ -40,12 +40,17 @@ def fetch_apify_actor(actor_id, payload):
         return []
 
 def main():
-    # 1. Fetch HiringCafe & LinkedIn jobs via Apify
+    # 1. Fetch HiringCafe jobs via Apify
     hc_payload = {
         "maxItems": 50,
-        "searchQueries": ["Technical Project Manager", "Product Manager", "IT Program Manager", "IT Delivery Lead", "Deputy Program Manager" ],
+        "searchQueries": [
+            "Technical Project Manager", 
+            "Product Manager", 
+            "IT Program Manager", 
+            "IT Delivery Lead", 
+            "Deputy Program Manager"
+        ],
         "locations": ["Virginia", "Washington, DC", "Maryland", "Remote"]
-        
     }
     raw_jobs = fetch_apify_actor("ocrad~hiringcafe-jobs-scraper", hc_payload)
 
@@ -72,7 +77,8 @@ def main():
     if not normalized_jobs:
         print("No new jobs returned from API; keeping existing board state.")
         return
-# 2. Inject and APPEND into index.html
+
+    # 2. Inject and Append into index.html
     try:
         with open("index.html", "r", encoding="utf-8") as f:
             html = f.read()
@@ -83,57 +89,41 @@ def main():
     pattern = r"(// <!-- JOBS_DATA_START -->\s*const initialJobs = )(\[.*?\])(;\s*// <!-- JOBS_DATA_END -->)"
     match = re.search(pattern, html, flags=re.DOTALL)
 
-    if match:
-        existing_jobs_json = match.group(2)
-        try:
-            existing_jobs = json.loads(existing_jobs_json)
-        except Exception:
-            existing_jobs = []
-
-        # Merge and deduplicate by Title + Company
-        seen = {f"{job.get('title')}{job.get('company')}" for job in existing_jobs}
-        added_count = 0
-        for job in normalized_jobs:
-            key = f"{job.get('title')}{job.get('company')}"
-            if key not in seen:
-                existing_jobs.insert(0, job)  # Prepend newest jobs
-                seen.add(key)
-                added_count += 1
-
-        print(f"Added {added_count} new jobs. Total jobs: {len(existing_jobs)}")
-
-        # Construct new content and write back to index.html
-        updated_jobs_json = json.dumps(existing_jobs, indent=2)
-        new_html = re.sub(
-            pattern,
-            rf"\g<1>{updated_jobs_json}\g<3>",
-            html,
-            flags=re.DOTALL
-        )
-
-        with open("index.html", "w", encoding="utf-8") as f:
-            f.write(new_html)
-        print("Successfully updated index.html with new jobs.")
-    else:
+    if not match:
         print("Error: Markers '// <!-- JOBS_DATA_START -->' and '// <!-- JOBS_DATA_END -->' not found in index.html.")
-        
-    # Merge and deduplicate by Job Title + Company
-    seen = {f"{job['title']} {job['company']}": True for job in existing_jobs}
+        return
+
+    existing_jobs_json = match.group(2)
+    try:
+        existing_jobs = json.loads(existing_jobs_json)
+    except Exception:
+        existing_jobs = []
+
+    # Merge and deduplicate by Title + Company
+    seen = {f"{job.get('title')}{job.get('company')}" for job in existing_jobs}
     added_count = 0
     
     for job in normalized_jobs:
-        key = f"{job['title']} {job['company']}"
+        key = f"{job.get('title')}{job.get('company')}"
         if key not in seen:
-            existing_jobs.insert(0, job) # Put newest jobs at the top
-            seen[key] = True
+            existing_jobs.insert(0, job)  # Prepend newest jobs to top
+            seen.add(key)
             added_count += 1
-    
-    # Write back to HTML
-    updated_json = json.dumps(existing_jobs, indent=2)
-    replacement = f"\\1{updated_json}\\3"
-    updated_html = re.sub(pattern, replacement, html, flags=re.DOTALL)
-    
+
+    print(f"Added {added_count} new jobs. Total jobs on board: {len(existing_jobs)}")
+
+    # Construct new content and write back to index.html
+    updated_jobs_json = json.dumps(existing_jobs, indent=2)
+    new_html = re.sub(
+        pattern,
+        rf"\g<1>{updated_jobs_json}\g<3>",
+        html,
+        flags=re.DOTALL
+    )
+
     with open("index.html", "w", encoding="utf-8") as f:
-        f.write(updated_html)
-    print(f"Successfully appended {added_count} new jobs. Board now has {len(existing_jobs)} total jobs.")
-    print("Markers not found in index.html.")
+        f.write(new_html)
+    print("Successfully updated index.html with new jobs.")
+
+if __name__ == "__main__":
+    main()
