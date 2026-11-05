@@ -24,11 +24,10 @@ def fetch_apify_actor(actor_id, payload):
     if not APIFY_TOKEN:
         print("No APIFY_API_TOKEN found in environment variables.")
         return []
-    
-    # Ensure slash is escaped as tilde for Apify REST routing
-   formatted_actor_id = actor_id.replace("/", "~")
+
+    formatted_actor_id = actor_id.replace("/", "~")
     url = f"https://api.apify.com/v2/acts/{formatted_actor_id}/run-sync-get-dataset-items"
-    
+
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -46,16 +45,14 @@ def fetch_apify_actor(actor_id, payload):
         return []
 
 def main():
-    # 1. Fetch HiringCafe jobs via active Apify Actor
     target_roles = [
         "Technical Project Manager",
         "IT Program Manager",
-        "Deputy Program Manager",
+        "Agile Product Owner",
         "IT Delivery Lead"
     ]
-    
+
     raw_jobs = []
-    # Query roles individually to match the Actor's single-query schema
     for role in target_roles:
         hc_payload = {
             "searchQuery": role,
@@ -68,7 +65,6 @@ def main():
 
     normalized_jobs = []
     for item in raw_jobs:
-        # Field mapping matching ocrad/hiringcafe-jobs-scraper output schema
         title = item.get("job_title") or item.get("title") or "Technical Project Manager"
         company = item.get("company_name") or item.get("company") or "Enterprise Partner"
         desc = item.get("job_description") or item.get("description") or ""
@@ -91,7 +87,6 @@ def main():
         print("No new jobs returned from API; keeping existing board state.")
         return
 
-    # 2. Inject and Append into index.html
     try:
         with open("index.html", "r", encoding="utf-8") as f:
             html = f.read()
@@ -112,20 +107,18 @@ def main():
     except Exception:
         existing_jobs = []
 
-    # Merge and deduplicate by Title + Company
     seen = {f"{job.get('title')}{job.get('company')}" for job in existing_jobs}
     added_count = 0
-    
+
     for job in normalized_jobs:
         key = f"{job.get('title')}{job.get('company')}"
         if key not in seen:
-            existing_jobs.insert(0, job)  # Prepend newest jobs to top
+            existing_jobs.insert(0, job)
             seen.add(key)
             added_count += 1
 
     print(f"Added {added_count} new jobs. Total jobs on board: {len(existing_jobs)}")
 
-    # Construct new content and write back to index.html
     updated_jobs_json = json.dumps(existing_jobs, indent=2)
     new_html = re.sub(
         pattern,
