@@ -72,47 +72,50 @@ def main():
     if not normalized_jobs:
         print("No new jobs returned from API; keeping existing board state.")
         return
-
- # 2. Inject and APPEND into index.html
-with open("index.html", "r", encoding="utf-8") as f:
-    html = f.read()
-
-pattern = r"(// <!-- JOBS_DATA_START -->\s*const initialJobs = )(\[.*?\])(;\s*// <!-- JOBS_DATA_END -->)"
-match = re.search(pattern, html, flags=re.DOTALL)
-
-if match:
-    # Load existing jobs from the HTML
-    existing_jobs_json = match.group(2)
-    try:
-        existing_jobs = json.loads(existing_jobs_json)
-    except:
-        existing_jobs = []
-        
-    # Merge and deduplicate by Job Title + Company
-    seen = {f"{job['title']} {job['company']}": True for job in existing_jobs}
-    added_count = 0
-    
-    for job in normalized_jobs:
-        key = f"{job['title']} {job['company']}"
-        if key not in seen:
-            existing_jobs.insert(0, job) # Put newest jobs at the top
-            seen[key] = True
-            added_count += 1
-            
 # 2. Inject and APPEND into index.html
-with open("index.html", "r", encoding="utf-8") as f:
-    html = f.read()
-
-pattern = r"(// <!-- JOBS_DATA_START -->\s*const initialJobs = )(\[.*?\])(;\s*// <!-- JOBS_DATA_END -->)"
-match = re.search(pattern, html, flags=re.DOTALL)
-
-if match:
-    # Load existing jobs from the HTML
-    existing_jobs_json = match.group(2)
     try:
-        existing_jobs = json.loads(existing_jobs_json)
-    except:
-        existing_jobs = []
+        with open("index.html", "r", encoding="utf-8") as f:
+            html = f.read()
+    except FileNotFoundError:
+        print("Error: index.html not found.")
+        return
+
+    pattern = r"(// <!-- JOBS_DATA_START -->\s*const initialJobs = )(\[.*?\])(;\s*// <!-- JOBS_DATA_END -->)"
+    match = re.search(pattern, html, flags=re.DOTALL)
+
+    if match:
+        existing_jobs_json = match.group(2)
+        try:
+            existing_jobs = json.loads(existing_jobs_json)
+        except Exception:
+            existing_jobs = []
+
+        # Merge and deduplicate by Title + Company
+        seen = {f"{job.get('title')}{job.get('company')}" for job in existing_jobs}
+        added_count = 0
+        for job in normalized_jobs:
+            key = f"{job.get('title')}{job.get('company')}"
+            if key not in seen:
+                existing_jobs.insert(0, job)  # Prepend newest jobs
+                seen.add(key)
+                added_count += 1
+
+        print(f"Added {added_count} new jobs. Total jobs: {len(existing_jobs)}")
+
+        # Construct new content and write back to index.html
+        updated_jobs_json = json.dumps(existing_jobs, indent=2)
+        new_html = re.sub(
+            pattern,
+            rf"\g<1>{updated_jobs_json}\g<3>",
+            html,
+            flags=re.DOTALL
+        )
+
+        with open("index.html", "w", encoding="utf-8") as f:
+            f.write(new_html)
+        print("Successfully updated index.html with new jobs.")
+    else:
+        print("Error: Markers '// <!-- JOBS_DATA_START -->' and '// <!-- JOBS_DATA_END -->' not found in index.html.")
         
     # Merge and deduplicate by Job Title + Company
     seen = {f"{job['title']} {job['company']}": True for job in existing_jobs}
