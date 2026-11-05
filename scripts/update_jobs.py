@@ -13,6 +13,41 @@ KEYWORDS = {
     "Modernization": 4, "Grants": 4, "Backlog": 3, "Six Sigma": 3
 }
 
+# 1. Allowed title keywords (must match at least one)
+TARGET_TITLE_WHITELIST = [
+    "project manager",
+    "technical project manager",
+    "it project manager",
+    "program manager",
+    "it program manager",
+    "product owner",
+    "agile product owner",
+    "product manager",
+    "scrum master",
+    "delivery lead",
+    "it delivery lead",
+    "release train engineer",
+    "rte",
+    "agile coach"
+]
+
+# 2. Strict blacklist to immediately reject trades, physical labor, retail, and sales
+EXCLUDE_TITLE_PATTERNS = [
+    "construction", "electrician", "electrical", "roof", "roofer",
+    "hvac", "plumber", "plumbing", "mechanic", "maintenance",
+    "store manager", "restaurant", "retail", "sales", "call center",
+    "nurse", "medical", "clinical", "cook", "driver", "warehouse"
+]
+
+# 3. Allowed target locations (strictly Northern Virginia towns + Remote)
+TARGET_LOCALITIES = [
+    "chantilly",
+    "reston",
+    "arlington",
+    "herndon",
+    "remote"
+]
+
 def score_job(text):
     base_score = 72
     text_lower = text.lower()
@@ -54,7 +89,7 @@ def fetch_apify_actor(actor_id, payload):
         return []
 
     poll_url = f"https://api.apify.com/v2/actor-runs/{run_id}"
-    max_wait = 100
+    max_wait = 600
     elapsed = 0
     poll_interval = 10
 
@@ -86,46 +121,87 @@ def fetch_apify_actor(actor_id, payload):
         print(f"Error fetching dataset items: {e}")
         return []
 
-def main():
-    payload = {
-        "queries": [
-            "Technical Project Manager",
-            "IT Program Manager",
-            "Deputy Program Manager"
-        ],
-        "locations": ["Virginia", "Washington DC", "Remote"],
-        "maxItems": 10,
-        "datePosted": "past-week"
-    }
+def is_valid_role(title):
+    t = title.lower()
+    # Reject if matches any blacklist pattern
+    if any(bad in t for bad in EXCLUDE_TITLE_PATTERNS):
+        return False
+    # Accept only if contains a whitelisted core title
+    return any(good in t for good in TARGET_TITLE_WHITELIST)
 
-    print("Fetching jobs via Apify (bebity/linkedin-jobs-scraper)...")
-    raw_jobs = fetch_apify_actor("bebity/linkedin-jobs-scraper", payload)
+def is_valid_location(location_str):
+    loc = location_str.lower()
+    # Reject foreign locations that leak through guest scrapes
+    if any(country in loc for country in ["india", "uk", "canada", "germany", "australia"]):
+        return False
+    # Accept if in targeted Northern Virginia towns or marked Remote
+    return any(target in loc for target in TARGET_LOCALITIES)
+
+def main():
+    # Focused roles and Northern Virginia specific locations
+    query_roles = [
+        "Technical Project Manager",
+        "IT Program Manager",
+        "Agile Product Owner"
+    ]
+    query_locations = [
+        "Chantilly, VA",
+        "Reston, VA",
+        "Arlington, VA",
+        "Herndon, VA",
+        "Fairfax, VA",
+        "Washington DC",
+        "Remote"
+    ]
+
+    raw_jobs = []
+
+    # Iterate focused queries (limited to 10 rows each to maintain speed and compute credits)
+    for role in query_roles:
+        for loc in query_locations:
+            payload = {
+                "title": role,
+                "location": loc,
+                "rows": 10,
+                "publishedAt": "past-week"
+            }
+            print(f"Scraping LinkedIn: '{role}' in '{loc}'...")
+            items = fetch_apify_actor("bebity/welcome-to-the-jungle-jobs-scraper", payload)
+            if isinstance(items, list):
+                raw_jobs.extend(items)
 
     normalized_jobs = []
-    if isinstance(raw_jobs, list):
-        for item in raw_jobs:
-            title = item.get("title") or item.get("jobTitle") or "Technical Project Manager"
-            company = item.get("companyName") or item.get("company") or "Enterprise Partner"
-            desc = item.get("description") or item.get("jobDescription") or ""
-            location = item.get("location") or "Virginia / Remote"
-            url = item.get("link") or item.get("jobUrl") or item.get("url") or "https://www.linkedin.com"
+    for item in raw_jobs:
+        title = item.get("title") or item.get("jobTitle") or ""
+        company = item.get("companyName") or item.get("company") or "Enterprise Partner"
+        desc = item.get("description") or item.get("jobDescription") or ""
+        location = item.get("location") or "Northern Virginia"
+        url = item.get("link") or item.get("jobUrl") or item.get("url") or "https://www.welcometothejungle.com"
 
-            match_score = score_job(f"{title} {desc}")
-            normalized_jobs.append({
-                "title": title,
-                "company": company,
-                "source": "LinkedIn",
-                "ats": item.get("ats", "Direct"),
-                "match": match_score,
-                "tags": [location, "PMP / Agile", "Full-Time"],
-                "desc": desc[:240] + "..." if len(desc) > 240 else desc,
-                "url": url
-            })
+        # Apply dual-layer filtering
+        if not is_valid_role(title):
+            continue
+
+        if not is_valid_location(location):
+            continue
+
+        match_score = score_job(f"{title} {desc}")
+        normalized_jobs.append({
+            "title": title,
+            "company": company,
+            "source": "LinkedIn",
+            "ats": item.get("ats", "Direct"),
+            "match": match_score,
+            "tags": [location, "PMP / Agile", "Full-Time"],
+            "desc": desc[:240] + "..." if len(desc) > 240 else desc,
+            "url": url
+        })
 
     if not normalized_jobs:
-        print("No new jobs returned from API; keeping existing board state.")
+        print("No valid target jobs passed filtering; keeping existing board state.")
         return
 
+    # Injection into index.html
     try:
         with open("index.html", "r", encoding="utf-8") as f:
             html = f.read()
@@ -139,14 +215,11 @@ def main():
     if START_MARKER not in html or END_MARKER not in html:
         print(f"Error: Markers '{START_MARKER}' and '{END_MARKER}' not found in index.html.")
         return
-    # Extract existing array safely between markers
-    
+
     before_marker = html.split(START_MARKER)[0]
     after_start = html.split(START_MARKER)[1]
     middle_content = after_start.split(END_MARKER)[0]
     after_marker = after_start.split(END_MARKER)[1]
-    
-    # Find the JSON array inside the middle section
 
     array_match = re.search(r"const initialJobs\s*=\s*(\[.*?\]);", middle_content, flags=re.DOTALL)
     existing_jobs = []
@@ -155,9 +228,11 @@ def main():
             existing_jobs = json.loads(array_match.group(1))
         except Exception:
             existing_jobs = []
-            
-    # Merge and deduplicate by Title + Company
-    
+
+    # Clean existing board state from any previous bad scrapes (electrician, roofer, etc.)
+    existing_jobs = [j for j in existing_jobs if is_valid_role(j.get("title", ""))]
+
+    # Deduplicate by Title + Company
     seen = {f"{job.get('title')}{job.get('company')}" for job in existing_jobs}
     added_count = 0
 
@@ -168,10 +243,8 @@ def main():
             seen.add(key)
             added_count += 1
 
-    print(f"Added {added_count} new jobs. Total jobs on board: {len(existing_jobs)}")
- 
-    # Format JSON cleanly without regex escaping issues
-    
+    print(f"Added {added_count} verified jobs. Total jobs on board: {len(existing_jobs)}")
+
     updated_jobs_json = json.dumps(existing_jobs, indent=2)
     replacement_block = f"\n  const initialJobs = {updated_jobs_json};\n  "
 
@@ -179,7 +252,7 @@ def main():
 
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(new_html)
-    print("Successfully updated index.html with new jobs.")
+    print("Successfully updated index.html with clean target jobs.")
 
 if __name__ == "__main__":
     main()
