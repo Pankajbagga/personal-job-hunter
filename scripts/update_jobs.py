@@ -22,17 +22,20 @@ def score_job(text):
 
 def fetch_apify_actor(actor_id, payload):
     if not APIFY_TOKEN:
-        print("No APIFY_API_TOKEN found. Using fallback mock verification.")
+        print("No APIFY_API_TOKEN found in environment variables.")
         return []
     
     # Ensure slash is escaped as tilde for Apify REST routing
-    formatted_actor_id = actor_id.replace("/", "~")
-    url = f"https://api.apify.com/v2/acts/{formatted_actor_id}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
+   formatted_actor_id = actor_id.replace("/", "~")
+    url = f"https://api.apify.com/v2/acts/{formatted_actor_id}/run-sync-get-dataset-items"
     
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {APIFY_TOKEN.strip()}"
+        },
         method="POST"
     )
     try:
