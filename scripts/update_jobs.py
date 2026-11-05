@@ -32,7 +32,6 @@ def fetch_apify_actor(actor_id, payload):
         "Authorization": f"Bearer {APIFY_TOKEN.strip()}"
     }
 
-    # 1. Trigger the run asynchronously
     start_url = f"https://api.apify.com/v2/acts/{formatted_actor_id}/runs"
     req = urllib.request.Request(
         start_url,
@@ -54,9 +53,8 @@ def fetch_apify_actor(actor_id, payload):
         print(f"Error starting {actor_id}: {e}")
         return []
 
-    # 2. Poll until the run completes (timeout after 5 minutes)
     poll_url = f"https://api.apify.com/v2/actor-runs/{run_id}"
-    max_wait = 300
+    max_wait = 100
     elapsed = 0
     poll_interval = 10
 
@@ -79,7 +77,6 @@ def fetch_apify_actor(actor_id, payload):
         except Exception as e:
             print(f"Polling error: {e}")
 
-    # 3. Retrieve dataset items
     data_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?clean=true&format=json"
     try:
         data_req = urllib.request.Request(data_url, headers=headers)
@@ -94,10 +91,10 @@ def main():
         "queries": [
             "Technical Project Manager",
             "IT Program Manager",
-            "Agile Product Owner"
+            "Deputy Program Manager"
         ],
         "locations": ["Virginia", "Washington DC", "Remote"],
-        "maxItems": 25,
+        "maxItems": 10,
         "datePosted": "past-week"
     }
 
@@ -136,19 +133,31 @@ def main():
         print("Error: index.html not found.")
         return
 
-    pattern = r"(// <!-- JOBS_DATA_START -->\s*const initialJobs = )(\[.*?\])(;\s*// <!-- JOBS_DATA_END -->)"
-    match = re.search(pattern, html, flags=re.DOTALL)
+    START_MARKER = "// <!-- JOBS_DATA_START -->"
+    END_MARKER = "// <!-- JOBS_DATA_END -->"
 
-    if not match:
-        print("Error: Markers '// <!-- JOBS_DATA_START -->' and '// <!-- JOBS_DATA_END -->' not found in index.html.")
+    if START_MARKER not in html or END_MARKER not in html:
+        print(f"Error: Markers '{START_MARKER}' and '{END_MARKER}' not found in index.html.")
         return
+    # Extract existing array safely between markers
+    
+    before_marker = html.split(START_MARKER)[0]
+    after_start = html.split(START_MARKER)[1]
+    middle_content = after_start.split(END_MARKER)[0]
+    after_marker = after_start.split(END_MARKER)[1]
+    
+    # Find the JSON array inside the middle section
 
-    existing_jobs_json = match.group(2)
-    try:
-        existing_jobs = json.loads(existing_jobs_json)
-    except Exception:
-        existing_jobs = []
-
+    array_match = re.search(r"const initialJobs\s*=\s*(\[.*?\]);", middle_content, flags=re.DOTALL)
+    existing_jobs = []
+    if array_match:
+        try:
+            existing_jobs = json.loads(array_match.group(1))
+        except Exception:
+            existing_jobs = []
+            
+    # Merge and deduplicate by Title + Company
+    
     seen = {f"{job.get('title')}{job.get('company')}" for job in existing_jobs}
     added_count = 0
 
@@ -160,14 +169,13 @@ def main():
             added_count += 1
 
     print(f"Added {added_count} new jobs. Total jobs on board: {len(existing_jobs)}")
-
+ 
+    # Format JSON cleanly without regex escaping issues
+    
     updated_jobs_json = json.dumps(existing_jobs, indent=2)
-    new_html = re.sub(
-        pattern,
-        rf"\g<1>{updated_jobs_json}\g<3>",
-        html,
-        flags=re.DOTALL
-    )
+    replacement_block = f"\n  const initialJobs = {updated_jobs_json};\n  "
+
+    new_html = f"{before_marker}{START_MARKER}{replacement_block}{END_MARKER}{after_marker}"
 
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(new_html)
