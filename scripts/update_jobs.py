@@ -1,4 +1,3 @@
-
 import os
 import re
 import json
@@ -25,7 +24,11 @@ def fetch_apify_actor(actor_id, payload):
     if not APIFY_TOKEN:
         print("No APIFY_API_TOKEN found. Using fallback mock verification.")
         return []
-    url = f"https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
+    
+    # Ensure slash is escaped as tilde for Apify REST routing
+    formatted_actor_id = actor_id.replace("/", "~")
+    url = f"https://api.apify.com/v2/acts/{formatted_actor_id}/run-sync-get-dataset-items?token={APIFY_TOKEN}"
+    
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -33,34 +36,41 @@ def fetch_apify_actor(actor_id, payload):
         method="POST"
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=180) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         print(f"Error calling {actor_id}: {e}")
         return []
 
 def main():
-    # 1. Fetch HiringCafe jobs via Apify
-    hc_payload = {
-        "maxItems": 50,
-        "searchQueries": [
-            "Technical Project Manager", 
-            "Product Manager", 
-            "IT Program Manager", 
-            "IT Delivery Lead", 
-            "Deputy Program Manager"
-        ],
-        "locations": ["Virginia", "Washington, DC", "Maryland", "Remote"]
-    }
-    raw_jobs = fetch_apify_actor("blackfalcondata/hiringcafe-scraper", hc_payload)
+    # 1. Fetch HiringCafe jobs via active Apify Actor
+    target_roles = [
+        "Technical Project Manager",
+        "IT Program Manager",
+        "Deputy Program Manager",
+        "IT Delivery Lead"
+    ]
+    
+    raw_jobs = []
+    # Query roles individually to match the Actor's single-query schema
+    for role in target_roles:
+        hc_payload = {
+            "searchQuery": role,
+            "location": "Virginia, Washington DC, Maryland, Remote",
+            "maxItems": 15
+        }
+        items = fetch_apify_actor("ocrad/hiringcafe-jobs-scraper", hc_payload)
+        if isinstance(items, list):
+            raw_jobs.extend(items)
 
     normalized_jobs = []
     for item in raw_jobs:
-        title = item.get("title") or "Senior Technical Project Manager"
-        company = item.get("companyName") or "Enterprise Partner"
-        desc = item.get("description") or ""
-        location = item.get("location") or "Northern Virginia / Hybrid"
-        url = item.get("url") or "https://hiringcafe.com"
+        # Field mapping matching ocrad/hiringcafe-jobs-scraper output schema
+        title = item.get("job_title") or item.get("title") or "Technical Project Manager"
+        company = item.get("company_name") or item.get("company") or "Enterprise Partner"
+        desc = item.get("job_description") or item.get("description") or ""
+        location = item.get("location") or "Northern Virginia / Remote"
+        url = item.get("apply_url") or item.get("url") or "https://hiringcafe.com"
 
         match_score = score_job(f"{title} {desc}")
         normalized_jobs.append({
