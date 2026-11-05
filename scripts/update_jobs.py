@@ -136,5 +136,4 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(updated_html)
     print(f"Successfully appended {added_count} new jobs. Board now has {len(existing_jobs)} total jobs.")
-else:
     print("Markers not found in index.html.")
